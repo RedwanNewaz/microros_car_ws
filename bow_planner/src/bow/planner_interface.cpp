@@ -23,7 +23,7 @@ BowPlannerInterface::BowPlannerInterface()
     setupTimer();
     
     RCLCPP_INFO(this->get_logger(), "BOW Planner Interface initialized successfully");
-    logStatus();
+    
 }
 
 void BowPlannerInterface::initializeParameters()
@@ -42,6 +42,7 @@ void BowPlannerInterface::initializeParameters()
     this->declare_parameter("position_tolerance", params_.position_tolerance);
     this->declare_parameter("angle_tolerance", params_.angle_tolerance);
     this->declare_parameter("max_planning_iterations", params_.max_planning_iterations);
+    this->declare_parameter("boundary", params_.boundary); // x_min, x_max, y_min, y_max
     
     // Get parameter values
     params_.dt = this->get_parameter("dt").as_double();
@@ -82,8 +83,8 @@ void BowPlannerInterface::initializeParameters()
     pm_->min_speed = params_.min_speed;
     pm_->max_yawrate = params_.max_yawrate;
     pm_->map_resolution = params_.map_resolution;
-    pm_->boundary = params_.boundary;
 }
+
 
 void BowPlannerInterface::setupPublishersAndSubscribers()
 {
@@ -238,7 +239,7 @@ void BowPlannerInterface::goalCallback(const geometry_msgs::msg::PoseStamped::Sh
 
 void BowPlannerInterface::controlTimerCallback()
 {
-    if (!initialized_ || goal_reached_) {
+    if (!initialized_ || goal_reached_ ) {
         return;
     }
     
@@ -248,8 +249,13 @@ void BowPlannerInterface::controlTimerCallback()
             RCLCPP_INFO(this->get_logger(), "Goal reached! Stopping robot.");
             stopRobot();
             goal_reached_ = true;
+            loop_count_ = 0;
+            initialized_ = false;
+            publishCmdVel(0.0, 0.0); // Stop robot
             return;
         }
+
+        // auto [success, trajectory] = planTrajectory();
         
         // Plan trajectory periodically or when needed
         bool should_replan = (loop_count_ % params_.pref_speed_index == 0) || !use_cached_trajectory_;
@@ -258,11 +264,11 @@ void BowPlannerInterface::controlTimerCallback()
         
         if (should_replan) {
             auto [success, new_trajectory] = planTrajectory();
-            if (success && !new_trajectory.empty() ) {
+            if (!new_trajectory.empty() ) {
 
                 if(collision_checker_->isCollision(new_trajectory)) {
                     RCLCPP_WARN(this->get_logger(), "Collision detected in planned trajectory, retrying");
-                    use_cached_trajectory_ = false;
+                    use_cached_trajectory_ = true;
                     return;
                 }
                 last_trajectory_ = std::move(new_trajectory);
@@ -298,11 +304,7 @@ void BowPlannerInterface::controlTimerCallback()
         
         loop_count_++;
         
-        // Periodic status logging
-        if (loop_count_ % 50 == 0) {
-            logStatus();
-        }
-        
+      
     } catch (const std::exception& e) {
         RCLCPP_ERROR(this->get_logger(), "Error in control loop: %s", e.what());
         stopRobot();
@@ -316,7 +318,7 @@ std::pair<bool, std::vector<bow::State>> BowPlannerInterface::planTrajectory()
     
     auto [solution_found, trajectory] = planner.solve(1.0, false);
     
-    if (!solution_found || trajectory.empty() || collision_checker_ == nullptr) {
+    if ( trajectory.empty() || collision_checker_ == nullptr) {
         RCLCPP_WARN(this->get_logger(), "No valid trajectory found");
         return {false, {}};
     }
@@ -417,8 +419,8 @@ void BowPlannerInterface::publishObstacles(const std::vector<geometry_msgs::msg:
 void BowPlannerInterface::publishCmdVel(double linear_vel, double angular_vel)
 {
     // Clamp velocities to safe limits
-    linear_vel = std::clamp(linear_vel, params_.min_speed, params_.max_speed);
-    angular_vel = std::clamp(angular_vel, -params_.max_yawrate, params_.max_yawrate);
+    // linear_vel = std::clamp(linear_vel, params_.min_speed, params_.max_speed);
+    // angular_vel = std::clamp(angular_vel, -params_.max_yawrate, params_.max_yawrate);
     
     geometry_msgs::msg::Twist cmd_vel;
     cmd_vel.linear.x = linear_vel;
@@ -501,21 +503,5 @@ std::pair<double, double> BowPlannerInterface::extractControlCommands(const std:
     return {linear_vel, angular_vel};
 }
 
-void BowPlannerInterface::logStatus() const
-{
-    // std::lock_guard<std::mutex> lock(state_mutex_);
-    
-    // double dx = current_state_(0, 0) - goal_state_(0, 0);
-    // double dy = current_state_(1, 0) - goal_state_(1, 0);
-    // double distance = std::sqrt(dx * dx + dy * dy);
-    
-    // RCLCPP_INFO(this->get_logger(), 
-    //            "Status - Position: (%.2f, %.2f), Goal: (%.2f, %.2f), Distance: %.2f, "
-    //            "Linear vel: %.2f, Angular vel: %.2f, Loop: %zu",
-    //            current_state_(0, 0), current_state_(1, 0),
-    //            goal_state_(0, 0), goal_state_(1, 0),
-    //            distance,
-    //            current_state_(3, 0), current_state_(4, 0),
-    //            loop_count_);
-}
+
 

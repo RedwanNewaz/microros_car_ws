@@ -42,7 +42,7 @@ struct BowPlannerParams {
     double angle_tolerance = 1e-2;
     int max_planning_iterations = 100;
 
-    std::vector<double> boundary; // x_min, x_max, y_min, y_max
+    std::vector<double> boundary = {-6.0, 6.0, -3.0, 3.0}; // x_min, x_max, y_min, y_max
 };
 
 /**
@@ -201,10 +201,7 @@ private:
      */
     std::pair<double, double> extractControlCommands(const std::vector<bow::State>& trajectory);
     
-    /**
-     * @brief Log system status
-     */
-    void logStatus() const;
+
 };
 
 #endif // BOW_PLANNER_INTERFACE_HPP

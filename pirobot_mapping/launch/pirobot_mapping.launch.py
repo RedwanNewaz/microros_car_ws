@@ -36,5 +36,5 @@ def generate_launch_description():
 
     ld = LaunchDescription()
     ld.add_action(mapping_node)
-    # ld.add_action(vicon_launch)
+    ld.add_action(vicon_launch)
     return ld
