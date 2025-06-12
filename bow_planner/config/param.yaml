@@ -2,12 +2,12 @@ max_speed: 1.0
 min_speed: 0.0
 max_yawrate: 2.6981
 
-dt: 0.2
+dt: 0.1
 predict_time: 1.87 #1.85
 
 robot_radius: 0.25
 goal_radius: 0.5
 
-pref_speed_index: 5
-num_samples: 5 # number of samples for limbo parameter
+pref_speed_index: 2
+num_samples: 15 # number of samples for limbo parameter
 boundary: [-6.0, 6.0, -3.0, 3.0]  # [xmin, xmax, ymin, ymax]

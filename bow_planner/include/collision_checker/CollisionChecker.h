@@ -39,6 +39,11 @@ namespace bow{
             return shared_from_this();
         }
 
+        bool outside_safe_boundary(double x, double y) const
+        {
+            return (x < safe_boundary_[0] || x > safe_boundary_[1] || y < safe_boundary_[2] || y > safe_boundary_[3]);
+        }
+
         bool isCollision(const std::vector<Eigen::Matrix<double, 5, 1>>&trajectory)
         {
 
@@ -47,7 +52,11 @@ namespace bow{
                 double wx = state(0);
                 double wy = state(1);
 
-                if(wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max) {
+                // if(wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max) {
+                //     return true; // Skip if the state is out of bounds
+                // }
+                // check if the state is within the safe boundary
+                if (outside_safe_boundary(wx, wy)) {
                     return true; // Skip if the state is out of bounds
                 }
 
@@ -114,6 +123,7 @@ namespace bow{
         int ox = 0;
         int oy = 0;
         OccupancyMap occupancyMap_;
+        std::vector<double> safe_boundary_{-3.0, 3.0, -2.8, 2.8}; // x_min, x_max, y_min, y_max
     };
     using CCPtr = std::shared_ptr<CollisionChecker>;
 

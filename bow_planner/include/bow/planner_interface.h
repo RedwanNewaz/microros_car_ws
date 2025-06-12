@@ -49,7 +49,8 @@ struct BowPlannerParams {
  * @brief Optimized BOW Planner Interface for ROS2
  * 
  * This class implements an optimized version of the BOW (Bezier Optimal Waypoint) 
- * planner interface with improved performance, error handling, and thread safety.
+ * planner interface with improved performance, error handling, thread safety, and
+ * trajectory optimization using shortest path selection between cached and new trajectories.
  */
 class BowPlannerInterface : public rclcpp::Node
 {
@@ -143,6 +144,23 @@ private:
      * @return Pair of solution status and trajectory
      */
     std::pair<bool, std::vector<bow::State>> planTrajectory();
+    
+    /**
+     * @brief Select optimal trajectory between new and cached trajectories
+     * @param new_trajectory Newly planned trajectory
+     * @param cached_trajectory Previously cached trajectory
+     * @return Optimal trajectory (shortest collision-free path)
+     */
+    std::vector<bow::State> selectOptimalTrajectory(
+        const std::vector<bow::State>& new_trajectory, 
+        const std::vector<bow::State>& cached_trajectory);
+    
+    /**
+     * @brief Calculate the total Euclidean length of a trajectory
+     * @param trajectory Vector of states representing the trajectory
+     * @return Total trajectory length in meters
+     */
+    double calculateTrajectoryLength(const std::vector<bow::State>& trajectory);
     
     /**
      * @brief Publish trajectory visualization

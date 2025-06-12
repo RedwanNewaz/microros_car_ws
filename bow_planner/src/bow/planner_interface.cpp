@@ -15,11 +15,7 @@ BowPlannerInterface::BowPlannerInterface()
     // Initialize components
     initializeParameters();
     setupPublishersAndSubscribers();
-    
-    // // Initialize collision checker with empty data initially
-    // std::vector<double> empty_x, empty_y;
-    // collision_checker_ = std::make_shared<bow::CollisionChecker>(empty_x, empty_y, params_.robot_radius);
-    
+        
     setupTimer();
     
     RCLCPP_INFO(this->get_logger(), "BOW Planner Interface initialized successfully");
@@ -242,6 +238,21 @@ void BowPlannerInterface::controlTimerCallback()
     if (!initialized_ || goal_reached_ ) {
         return;
     }
+
+    // Ensure collision checker is initialized
+    if (!collision_checker_) {
+        RCLCPP_WARN(this->get_logger(), "Collision checker not initialized, skipping control loop");
+        return;
+    }
+    // Ensure robot is within safe boundaries
+    {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        if (collision_checker_->outside_safe_boundary(current_state_(0, 0), current_state_(1, 0))) {
+            RCLCPP_WARN(this->get_logger(), "Robot outside safe boundary, stopping");
+            stopRobot();
+            return;
+        }
+    }
     
     try {
         // Check if goal is reached
@@ -255,8 +266,6 @@ void BowPlannerInterface::controlTimerCallback()
             return;
         }
 
-        // auto [success, trajectory] = planTrajectory();
-        
         // Plan trajectory periodically or when needed
         bool should_replan = (loop_count_ % params_.pref_speed_index == 0) || !use_cached_trajectory_;
         
@@ -264,29 +273,63 @@ void BowPlannerInterface::controlTimerCallback()
         
         if (should_replan) {
             auto [success, new_trajectory] = planTrajectory();
-            if (!new_trajectory.empty() ) {
-
-                if(collision_checker_->isCollision(new_trajectory)) {
-                    RCLCPP_WARN(this->get_logger(), "Collision detected in planned trajectory, retrying");
-                    use_cached_trajectory_ = true;
-                    return;
-                }
-                last_trajectory_ = std::move(new_trajectory);
-                use_cached_trajectory_ = true;
-                trajectory = last_trajectory_;
-                publishTrajectory(trajectory);
-                RCLCPP_DEBUG(this->get_logger(), "New trajectory planned with %zu states", trajectory.size());
-            } else {
-                RCLCPP_WARN(this->get_logger(), "Planning failed, using cached trajectory or stopping");
-                if (!last_trajectory_.empty()) {
-                    trajectory = last_trajectory_;
+            
+            if (!new_trajectory.empty()) {
+                // Check collision for new trajectory
+                if (collision_checker_->isCollision(new_trajectory)) {
+                    RCLCPP_WARN(this->get_logger(), "Collision detected in new trajectory");
+                    
+                    // Use cached trajectory if available and collision-free
+                    if (!last_trajectory_.empty() && !collision_checker_->isCollision(last_trajectory_)) {
+                        trajectory = last_trajectory_;
+                        RCLCPP_DEBUG(this->get_logger(), "Using collision-free cached trajectory");
+                    } else {
+                        RCLCPP_WARN(this->get_logger(), "No valid trajectory available, stopping");
+                        stopRobot();
+                        return;
+                    }
                 } else {
+                    // Both trajectories are collision-free, choose the shorter one
+                    trajectory = selectOptimalTrajectory(new_trajectory, last_trajectory_);
+                    last_trajectory_ = trajectory;
+                    use_cached_trajectory_ = true;
+                    publishTrajectory(trajectory);
+                    RCLCPP_DEBUG(this->get_logger(), "Selected optimal trajectory with %zu states", trajectory.size());
+                }
+            } else {
+                RCLCPP_WARN(this->get_logger(), "Planning failed");
+                
+                // Fallback to cached trajectory if available and collision-free
+                if (!last_trajectory_.empty() && !collision_checker_->isCollision(last_trajectory_)) {
+                    trajectory = last_trajectory_;
+                    RCLCPP_DEBUG(this->get_logger(), "Using cached trajectory as fallback");
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "No valid trajectory available, stopping");
                     stopRobot();
                     return;
                 }
             }
         } else {
-            trajectory = last_trajectory_;
+            // Use cached trajectory but verify it's still collision-free
+            if (!last_trajectory_.empty()) {
+                if (!collision_checker_->isCollision(last_trajectory_)) {
+                    trajectory = last_trajectory_;
+                } else {
+                    RCLCPP_WARN(this->get_logger(), "Cached trajectory has collision, replanning");
+                    auto [success, new_trajectory] = planTrajectory();
+                    if (!new_trajectory.empty() && !collision_checker_->isCollision(new_trajectory)) {
+                        trajectory = new_trajectory;
+                        last_trajectory_ = trajectory;
+                        publishTrajectory(trajectory);
+                    } else {
+                        stopRobot();
+                        return;
+                    }
+                }
+            } else {
+                stopRobot();
+                return;
+            }
         }
         
         // Extract and publish control commands
@@ -309,6 +352,48 @@ void BowPlannerInterface::controlTimerCallback()
         RCLCPP_ERROR(this->get_logger(), "Error in control loop: %s", e.what());
         stopRobot();
     }
+}
+
+std::vector<bow::State> BowPlannerInterface::selectOptimalTrajectory(
+    const std::vector<bow::State>& new_trajectory, 
+    const std::vector<bow::State>& cached_trajectory)
+{
+    // If cached trajectory is empty or has collision, use new trajectory
+    if (cached_trajectory.empty() || collision_checker_->isCollision(cached_trajectory)) {
+        RCLCPP_DEBUG(this->get_logger(), "Using new trajectory (cached invalid)");
+        return new_trajectory;
+    }
+    
+    // Calculate trajectory lengths (Euclidean distance)
+    double new_length = calculateTrajectoryLength(new_trajectory);
+    double cached_length = calculateTrajectoryLength(cached_trajectory);
+    
+    // Add small bias towards new trajectory to encourage exploration
+    const double exploration_bias = 1.05; // 5% bias
+    
+    if (new_length * exploration_bias < cached_length) {
+        RCLCPP_DEBUG(this->get_logger(), "Selected new trajectory (%.3f < %.3f)", new_length, cached_length);
+        return new_trajectory;
+    } else {
+        RCLCPP_DEBUG(this->get_logger(), "Selected cached trajectory (%.3f >= %.3f)", cached_length, new_length);
+        return cached_trajectory;
+    }
+}
+
+double BowPlannerInterface::calculateTrajectoryLength(const std::vector<bow::State>& trajectory)
+{
+    if (trajectory.size() < 2) {
+        return 0.0;
+    }
+    
+    double total_length = 0.0;
+    for (size_t i = 1; i < trajectory.size(); ++i) {
+        double dx = trajectory[i](0, 0) - trajectory[i-1](0, 0);
+        double dy = trajectory[i](1, 0) - trajectory[i-1](1, 0);
+        total_length += std::sqrt(dx * dx + dy * dy);
+    }
+    
+    return total_length;
 }
 
 std::pair<bool, std::vector<bow::State>> BowPlannerInterface::planTrajectory()
@@ -502,6 +587,3 @@ std::pair<double, double> BowPlannerInterface::extractControlCommands(const std:
     
     return {linear_vel, angular_vel};
 }
-
-
-
