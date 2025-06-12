@@ -57,6 +57,7 @@ void BowPlannerInterface::initializeParameters()
     params_.position_tolerance = this->get_parameter("position_tolerance").as_double();
     params_.angle_tolerance = this->get_parameter("angle_tolerance").as_double();
     params_.max_planning_iterations = this->get_parameter("max_planning_iterations").as_int();
+    params_.boundary = this->get_parameter("boundary").as_double_array();
     
     // Validate parameters
     if (params_.dt <= 0.0 || params_.dt > 1.0) {
@@ -81,6 +82,7 @@ void BowPlannerInterface::initializeParameters()
     pm_->min_speed = params_.min_speed;
     pm_->max_yawrate = params_.max_yawrate;
     pm_->map_resolution = params_.map_resolution;
+    pm_->boundary = params_.boundary;
 }
 
 void BowPlannerInterface::setupPublishersAndSubscribers()
@@ -195,8 +197,9 @@ void BowPlannerInterface::pointCloudCallback(const sensor_msgs::msg::PointCloud2
         // Update collision checker with thread safety
         {
             std::lock_guard<std::mutex> lock(collision_checker_mutex_);
+            //FIXME: arguments for collision checker constructor
             collision_checker_ = std::make_shared<bow::CollisionChecker>(
-                x_coords, y_coords, params_.robot_radius);
+                x_coords, y_coords, params_.robot_radius, params_.map_resolution, params_.boundary);
         }
         
         // Publish obstacle visualization

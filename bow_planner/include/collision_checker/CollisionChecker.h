@@ -7,7 +7,7 @@
 #include <vector>
 #include <array>
 #include <memory>
-#include "kdtree.h"
+#include "OccupancyMap.h"
 #include <Eigen/Dense>
 
 namespace bow{
@@ -15,22 +15,22 @@ namespace bow{
     class CollisionChecker : public std::enable_shared_from_this<CollisionChecker> {
     public:
         using CCPtr = std::shared_ptr<CollisionChecker>;
-        CollisionChecker(const std::vector<double>& X, const std::vector<double>& Y, double robotRadius):_robotRadius(robotRadius)
+        CollisionChecker(const std::vector<double>& X, const std::vector<double>& Y, double robotRadius, double mapResolution, std::vector<double> boundary)
         {
-            if(X.size() != Y.size() || X.empty()) {
-                return;
-            }
-            
-            for (int i = 0; i < X.size(); ++i) {
-              std::vector<double> point(2);
-              point[0] = X[i];
-              point[1] = Y[i];
-              nodes.push_back(Kdtree::KdNode(point));
-            }
-            _kdtree = std::make_unique<Kdtree::KdTree>(&nodes);
-            _initialized = true;
+            _x_min = boundary[0];
+            _x_max = boundary[1];
+            _y_min = boundary[2];
+            _y_max = boundary[3];
 
-            // std::cout << "CollisionChecker initialized with " << nodes.size() << " points." << std::endl;
+            _robotRadius = robotRadius;
+            _mapResolution = mapResolution;
+
+            for(int i = 0; i < X.size(); ++i)
+            {
+                int x = toMapCoordX(X[i]);
+                int y = toMapCoordY(Y[i]);
+                occupancyMap_.markOccupied(x, y);
+            }
 
         }
 
@@ -41,40 +41,79 @@ namespace bow{
 
         bool isCollision(const std::vector<Eigen::Matrix<double, 5, 1>>&trajectory)
         {
-            if (!_initialized) {
-                std::cerr << "CollisionChecker not initialized." << std::endl;
-                return false; // Not initialized, no collision check
-            }
 
             for (int j = trajectory.size(); j-- > 0;) {
                 auto state = trajectory[j];
-                std::vector<double> test_point(2);
-                test_point[0] = state(0);
-                test_point[1] = state(1);
-                Kdtree::KdNodeVector result;
-                _kdtree->k_nearest_neighbors(test_point, _robotRadius, &result);
-                if(!result.empty())
-                {
-                    // Check if the nearest point is within the robot's radius
-                    double dx = result[0].point[0] - test_point[0];
-                    double dy = result[0].point[1] - test_point[1];
-                    double distance_squared = dx * dx + dy * dy;
-                    if (distance_squared < _robotRadius * _robotRadius)
-                    {
-                        std::cout << "Collision detected at point: (" << test_point[0] << ", " << test_point[1] << ")" << std::endl;
-                        return true; // Collision detected
-                    }
-                }         
+                double wx = state(0);
+                double wy = state(1);
+
+                if(wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max) {
+                    return true; // Skip if the state is out of bounds
+                }
+
+                int x = toMapCoordX(wx);
+                int y = toMapCoordY(wy);
+                if (isCollision(x, y)) {
+                    return true;
+                }
             }
             return false;
         }
 
-    private:
-        Kdtree::KdNodeVector nodes;
-        bool _initialized = false;
-        double _robotRadius;
-        std::unique_ptr<Kdtree::KdTree> _kdtree;
+        bool isOccupied(int x, int y)
+        {
+            return occupancyMap_.isOccupied(x, y);
+        }
+        bool isCollision(int x, int y)
+        {
+            return occupancyMap_.isCollision(x, y, _robotRadius / _mapResolution);
+        }
+        int getRobotRadius() const
+        {
+            return static_cast<int>(_robotRadius / _mapResolution);
+        }
 
+        double toWorldCoordX(int xx) const
+        {
+            double x = (xx - ox) / static_cast<double>(MapWidth());
+            return _x_min + x * (_x_max - _x_min);
+        }
+
+        double toWorldCoordY(int yy) const
+        {
+            double y = (yy - oy) / static_cast<double>(MapHeight());
+            return _y_min + y * (_y_max - _y_min);
+        }
+
+        int toMapCoordX(double xx) const
+        {
+            double x = (xx - _x_min) / (_x_max - _x_min);
+            return ox + x * MapWidth();
+        }
+
+        int toMapCoordY(double yy) const
+        {
+            double y = (yy - _y_min) / (_y_max - _y_min);
+            return oy +  y * MapHeight();
+        }
+        int MapWidth() const
+        {
+            int scale = (_x_max - _x_min) / _mapResolution;
+            return   scale;
+        }
+        int MapHeight() const
+        {
+            int scale = (_y_max - _y_min) / _mapResolution;
+            return  scale;
+        }
+    private:
+        double _robotRadius;
+        double _mapResolution;
+
+        double _x_min, _x_max, _y_min, _y_max;
+        int ox = 0;
+        int oy = 0;
+        OccupancyMap occupancyMap_;
     };
     using CCPtr = std::shared_ptr<CollisionChecker>;
 

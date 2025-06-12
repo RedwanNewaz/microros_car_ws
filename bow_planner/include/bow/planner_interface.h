@@ -41,6 +41,8 @@ struct BowPlannerParams {
     double position_tolerance = 1e-3;
     double angle_tolerance = 1e-2;
     int max_planning_iterations = 100;
+
+    std::vector<double> boundary; // x_min, x_max, y_min, y_max
 };
 
 /**
