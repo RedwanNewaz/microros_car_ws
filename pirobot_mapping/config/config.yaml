@@ -1,0 +1,16 @@
+odom_topic: "/vicon/pirobot/pirobot"
+laser_topic: "/scan"
+map_frame: "map"
+laser_frame: "laser_frame"
+base_frame: "map"
+laser_offset_x: 0.0
+laser_offset_y: 0.0
+laser_offset_yaw: 3.2666 #0.125
+min_filter_distance: 0.345
+max_range_filter: 10.0
+log_throttle_duration: 2.0
+marker_size: 0.05
+marker_color: [1.0, 0.0, 0.0, 0.8]  # RGBA
+map_resolution: 0.05
+target_area: [-6.0, 6.0, -3.0, 3.0]  # [xmin, xmax, ymin, ymax]
+prob_threshold: 0.05
