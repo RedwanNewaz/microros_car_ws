@@ -284,11 +284,12 @@ void BowPlannerInterface::controlTimerCallback()
             current_state_(3, 0) = target_state(3, 0);
             current_state_(4, 0) = target_state(4, 0);
             std::copy(traj.begin(), traj.begin() + N + 1, std::back_inserter(executed_trajectory));
+
+            // publish command velocity
+            publishCmdVel(current_state_(3, 0), current_state_(4, 0));  
+            publishTrajectory(executed_trajectory);
         }
 
-        // publish command velocity
-        publishCmdVel(current_state_(3, 0), current_state_(4, 0));  
-        publishTrajectory(executed_trajectory);
     }
     
     
