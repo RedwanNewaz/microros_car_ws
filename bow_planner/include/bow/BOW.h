@@ -35,6 +35,8 @@ namespace bow {
         // Operator for Bayesian optimization
         Eigen::VectorXd operator()(const Eigen::VectorXd& u) const;
 
+        Traj calcTrajectory(State x, double v, double y, const Point& goal) const;
+
     private:
         // Member variables
         Point goal_;
@@ -59,7 +61,7 @@ namespace bow {
         State motionODE(const State& x, const Control& u, double dt) const;
 
 
-        Traj calcTrajectory(State x, double v, double y, const Point& goal) const;
+        
         std::pair<int, double> calcToGoalCost(const Traj& traj, const Point& goal) const;
         // Custom Runge-Kutta 4 integration method
         State rungeKutta4Integration(

@@ -244,6 +244,22 @@ void BowPlannerInterface::controlTimerCallback()
         RCLCPP_WARN(this->get_logger(), "Collision checker not initialized, skipping control loop");
         return;
     }
+    
+    // Check if goal is reached
+    if (isGoalReached()) {
+        RCLCPP_INFO(this->get_logger(), "Goal reached! Stopping robot.");
+        stopRobot();
+        goal_reached_ = true;
+        loop_count_ = 0;
+        initialized_ = false;
+        publishCmdVel(0.0, 0.0); // Stop robot
+        return;
+    }
+
+    if( loop_count_++ % pm_->pref_speed_index != 0) {
+        return; // Skip control loop to reduce frequency
+    }
+    
     // Ensure robot is within safe boundaries
     {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -252,106 +268,31 @@ void BowPlannerInterface::controlTimerCallback()
             stopRobot();
             return;
         }
-    }
-    
-    try {
-        // Check if goal is reached
-        if (isGoalReached()) {
-            RCLCPP_INFO(this->get_logger(), "Goal reached! Stopping robot.");
-            stopRobot();
-            goal_reached_ = true;
-            loop_count_ = 0;
-            initialized_ = false;
-            publishCmdVel(0.0, 0.0); // Stop robot
-            return;
+
+        // compute control input
+        bow::BOPlanner mpc(current_state_, goal_state_, collision_checker_->getSharedPtr(), pm_->getSharedPtr());
+        auto u = mpc.computeControl();
+        auto traj = mpc.calcTrajectory(current_state_, u(0), u(1),  goal_state_);
+        
+        if(!collision_checker_->isCollision(traj) && !traj.empty())
+        {
+              //  instead of one step, we can use preferred speed
+            int N = std::min((int) traj.size() - 1, pm_->pref_speed_index);
+            auto target_state = traj[N];
+            current_state_(3, 0) = target_state(3, 0);
+            current_state_(4, 0) = target_state(4, 0);
         }
 
-        // Plan trajectory periodically or when needed
-        bool should_replan = (loop_count_ % params_.pref_speed_index == 0) || !use_cached_trajectory_;
-        
-        std::vector<bow::State> trajectory;
-        
-        if (should_replan) {
-            auto [success, new_trajectory] = planTrajectory();
-            
-            if (!new_trajectory.empty()) {
-                // Check collision for new trajectory
-                if (collision_checker_->isCollision(new_trajectory)) {
-                    RCLCPP_WARN(this->get_logger(), "Collision detected in new trajectory");
-                    
-                    // Use cached trajectory if available and collision-free
-                    if (!last_trajectory_.empty() && !collision_checker_->isCollision(last_trajectory_)) {
-                        trajectory = last_trajectory_;
-                        RCLCPP_DEBUG(this->get_logger(), "Using collision-free cached trajectory");
-                    } else {
-                        RCLCPP_WARN(this->get_logger(), "No valid trajectory available, stopping");
-                        stopRobot();
-                        return;
-                    }
-                } else {
-                    // Both trajectories are collision-free, choose the shorter one
-                    trajectory = selectOptimalTrajectory(new_trajectory, last_trajectory_);
-                    last_trajectory_ = trajectory;
-                    use_cached_trajectory_ = true;
-                    publishTrajectory(trajectory);
-                    RCLCPP_DEBUG(this->get_logger(), "Selected optimal trajectory with %zu states", trajectory.size());
-                }
-            } else {
-                RCLCPP_WARN(this->get_logger(), "Planning failed");
-                
-                // Fallback to cached trajectory if available and collision-free
-                if (!last_trajectory_.empty() && !collision_checker_->isCollision(last_trajectory_)) {
-                    trajectory = last_trajectory_;
-                    RCLCPP_DEBUG(this->get_logger(), "Using cached trajectory as fallback");
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "No valid trajectory available, stopping");
-                    stopRobot();
-                    return;
-                }
-            }
-        } else {
-            // Use cached trajectory but verify it's still collision-free
-            if (!last_trajectory_.empty()) {
-                if (!collision_checker_->isCollision(last_trajectory_)) {
-                    trajectory = last_trajectory_;
-                } else {
-                    RCLCPP_WARN(this->get_logger(), "Cached trajectory has collision, replanning");
-                    auto [success, new_trajectory] = planTrajectory();
-                    if (!new_trajectory.empty() && !collision_checker_->isCollision(new_trajectory)) {
-                        trajectory = new_trajectory;
-                        last_trajectory_ = trajectory;
-                        publishTrajectory(trajectory);
-                    } else {
-                        stopRobot();
-                        return;
-                    }
-                }
-            } else {
-                stopRobot();
-                return;
-            }
-        }
-        
-        // Extract and publish control commands
-        if (!trajectory.empty()) {
-            auto [linear_vel, angular_vel] = extractControlCommands(trajectory);
-            publishCmdVel(linear_vel, angular_vel);
-            
-            // Update current state velocities
-            {
-                std::lock_guard<std::mutex> lock(state_mutex_);
-                current_state_(3, 0) = linear_vel;
-                current_state_(4, 0) = angular_vel;
-            }
-        }
-        
-        loop_count_++;
-        
-      
-    } catch (const std::exception& e) {
-        RCLCPP_ERROR(this->get_logger(), "Error in control loop: %s", e.what());
-        stopRobot();
+        // publish command velocity
+        publishCmdVel(current_state_(3, 0), current_state_(4, 0));
+        publishPose(current_state_);    
+        publishTrajectory(traj);
     }
+    
+    
+     
+
+       
 }
 
 std::vector<bow::State> BowPlannerInterface::selectOptimalTrajectory(
