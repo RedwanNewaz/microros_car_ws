@@ -30,7 +30,6 @@ include_directories(
 
 set(SRC_FILES
   src/bow/BOW.cpp
-  src/collision_checker/kdtree.cpp
 )
 add_library(limbo INTERFACE)
 add_library(bow SHARED ${SRC_FILES})
@@ -42,8 +41,7 @@ target_link_libraries(bow PUBLIC
 )
 
 add_executable(bow_planner_node src/bow_planner_node.cpp 
-          src/bow/planner_interface.cpp 
-          src/collision_checker/kdtree.cpp)
+          src/bow/planner_interface.cpp )
 
           
 target_include_directories(bow_planner_node PUBLIC

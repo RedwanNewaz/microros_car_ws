@@ -196,7 +196,7 @@ void BowPlannerInterface::pointCloudCallback(const sensor_msgs::msg::PointCloud2
             std::lock_guard<std::mutex> lock(collision_checker_mutex_);
             //FIXME: arguments for collision checker constructor
             collision_checker_ = std::make_shared<bow::CollisionChecker>(
-                x_coords, y_coords, params_.robot_radius, params_.map_resolution, params_.boundary);
+                x_coords, y_coords, params_.robot_radius, params_.boundary);
         }
         
         // Publish obstacle visualization

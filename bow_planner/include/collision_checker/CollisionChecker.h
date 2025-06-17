@@ -7,15 +7,17 @@
 #include <vector>
 #include <array>
 #include <memory>
-#include "OccupancyMap.h"
 #include <Eigen/Dense>
+#include <list>
+#include "olcUTIL_QuadTree.h"
 
 namespace bow{
 
     class CollisionChecker : public std::enable_shared_from_this<CollisionChecker> {
+
     public:
         using CCPtr = std::shared_ptr<CollisionChecker>;
-        CollisionChecker(const std::vector<double>& X, const std::vector<double>& Y, double robotRadius, double mapResolution, std::vector<double> boundary)
+        CollisionChecker(const std::vector<double>& X, const std::vector<double>& Y, double robotRadius, std::vector<double> boundary)
         {
             _x_min = boundary[0];
             _x_max = boundary[1];
@@ -23,13 +25,19 @@ namespace bow{
             _y_max = boundary[3];
 
             _robotRadius = robotRadius;
-            _mapResolution = mapResolution;
+            double radii = _robotRadius;
 
             for(int i = 0; i < X.size(); ++i)
             {
-                int x = toMapCoordX(X[i]);
-                int y = toMapCoordY(Y[i]);
-                occupancyMap_.markOccupied(x, y);
+                obstacle obs;
+                obs.id = i + 1;
+                obs.type = 2;
+                obs.x = X[i];
+                obs.y = Y[i];
+                obs.width = radii;
+                obs.height = radii;
+                olc::utils::geom2d::rect<float> rect{{obs.x, obs.y}, {obs.width, obs.height}};
+                obstacles_.insert(obs, rect);
             }
 
         }
@@ -39,11 +47,6 @@ namespace bow{
             return shared_from_this();
         }
 
-        bool outside_safe_boundary(double x, double y) const
-        {
-            return (x < safe_boundary_[0] || x > safe_boundary_[1] || y < safe_boundary_[2] || y > safe_boundary_[3]);
-        }
-
         bool isCollision(const std::vector<Eigen::Matrix<double, 5, 1>>&trajectory)
         {
 
@@ -51,79 +54,54 @@ namespace bow{
                 auto state = trajectory[j];
                 double wx = state(0);
                 double wy = state(1);
-
-                // if(wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max) {
-                //     return true; // Skip if the state is out of bounds
-                // }
-                // check if the state is within the safe boundary
-                if (outside_safe_boundary(wx, wy)) {
-                    return true; // Skip if the state is out of bounds
-                }
-
-                int x = toMapCoordX(wx);
-                int y = toMapCoordY(wy);
-                if (isCollision(x, y)) {
+                if(isWorkspaceCollision(wx, wy, _robotRadius))
                     return true;
+            }
+            return false;
+        }
+
+        bool isWorkspaceCollision(double wx, double wy, double length)
+        {
+            if(wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max)
+                return true;
+            obstacle robot;
+            robot.id = 0;
+            robot.type = 2;
+            robot.x = wx;
+            robot.y = wy;
+            robot.width = length ;
+            robot.height = length;
+            olc::utils::geom2d::rect<float> rect{{robot.x, robot.y}, {robot.width, robot.height}};
+
+            auto potential_collisions = obstacles_.search(rect);
+            if(!potential_collisions.empty())
+            {
+                for(auto& it: potential_collisions)
+                {
+                    return true; // collision detected
                 }
             }
             return false;
         }
 
-        bool isOccupied(int x, int y)
+        bool outside_safe_boundary(double wx, double wy)
         {
-            return occupancyMap_.isOccupied(x, y);
-        }
-        bool isCollision(int x, int y)
-        {
-            return occupancyMap_.isCollision(x, y, _robotRadius / _mapResolution);
-        }
-        int getRobotRadius() const
-        {
-            return static_cast<int>(_robotRadius / _mapResolution);
+            return (wx < _x_min || wx > _x_max || wy < _y_min || wy > _y_max);
         }
 
-        double toWorldCoordX(int xx) const
-        {
-            double x = (xx - ox) / static_cast<double>(MapWidth());
-            return _x_min + x * (_x_max - _x_min);
-        }
 
-        double toWorldCoordY(int yy) const
-        {
-            double y = (yy - oy) / static_cast<double>(MapHeight());
-            return _y_min + y * (_y_max - _y_min);
-        }
-
-        int toMapCoordX(double xx) const
-        {
-            double x = (xx - _x_min) / (_x_max - _x_min);
-            return ox + x * MapWidth();
-        }
-
-        int toMapCoordY(double yy) const
-        {
-            double y = (yy - _y_min) / (_y_max - _y_min);
-            return oy +  y * MapHeight();
-        }
-        int MapWidth() const
-        {
-            int scale = (_x_max - _x_min) / _mapResolution;
-            return   scale;
-        }
-        int MapHeight() const
-        {
-            int scale = (_y_max - _y_min) / _mapResolution;
-            return  scale;
-        }
     private:
         double _robotRadius;
-        double _mapResolution;
-
         double _x_min, _x_max, _y_min, _y_max;
-        int ox = 0;
-        int oy = 0;
-        OccupancyMap occupancyMap_;
-        std::vector<double> safe_boundary_{-3.0, 3.0, -2.8, 2.8}; // x_min, x_max, y_min, y_max
+        struct obstacle{
+            int id;
+            int type;
+            float x;
+            float y;
+            float width;
+            float height;
+        };
+        olc::utils::QuadTreeContainer<obstacle> obstacles_;
     };
     using CCPtr = std::shared_ptr<CollisionChecker>;
 
