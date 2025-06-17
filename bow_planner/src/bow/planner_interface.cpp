@@ -284,8 +284,7 @@ void BowPlannerInterface::controlTimerCallback()
         }
 
         // publish command velocity
-        publishCmdVel(current_state_(3, 0), current_state_(4, 0));
-        publishPose(current_state_);    
+        publishCmdVel(current_state_(3, 0), current_state_(4, 0));  
         publishTrajectory(traj);
     }
     
