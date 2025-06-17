@@ -273,6 +273,8 @@ void BowPlannerInterface::controlTimerCallback()
         bow::BOPlanner mpc(current_state_, goal_state_, collision_checker_->getSharedPtr(), pm_->getSharedPtr());
         auto u = mpc.computeControl();
         auto traj = mpc.calcTrajectory(current_state_, u(0), u(1),  goal_state_);
+
+        bow::Traj executed_trajectory;
         
         if(!collision_checker_->isCollision(traj) && !traj.empty())
         {
@@ -281,11 +283,12 @@ void BowPlannerInterface::controlTimerCallback()
             auto target_state = traj[N];
             current_state_(3, 0) = target_state(3, 0);
             current_state_(4, 0) = target_state(4, 0);
+            std::copy(traj.begin(), traj.begin() + N + 1, std::back_inserter(executed_trajectory));
         }
 
         // publish command velocity
         publishCmdVel(current_state_(3, 0), current_state_(4, 0));  
-        publishTrajectory(traj);
+        publishTrajectory(executed_trajectory);
     }
     
     
